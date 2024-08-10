@@ -26,6 +26,10 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('ice-candidate', candidate);
     });
 
+    socket.on('disconnect-call', () => {
+        socket.broadcast.emit('disconnect-call');
+    });
+
     socket.on('disconnect', () => {
         console.log('User disconnected');
     });
