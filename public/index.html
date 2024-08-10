@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chat with Strangers</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #f8f9fa;
+            margin: 0;
+        }
+        .container {
+            text-align: center;
+            max-width: 500px;
+        }
+        .btn-custom {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        .btn-custom:hover {
+            background-color: #0056b3;
+        }
+        .status {
+            margin: 20px 0;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="display-4">Voice Chat with Strangers</h1>
+        <p class="lead">Connect and talk with random people through voice chat.</p>
+        <div class="status">
+            <p id="status">Click "Start Call" to connect...</p>
+        </div>
+        <button class="btn btn-custom" id="startCall">Start Call</button>
+        <button class="btn btn-secondary mt-2" id="endCall" style="display: none;">End Call</button>
+    </div>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script>
+        const socket = io('http://localhost:3000');
+        const status = document.getElementById('status');
+        const startCallBtn = document.getElementById('startCall');
+        const endCallBtn = document.getElementById('endCall');
+        let localStream;
+        let peerConnection;
+        const config = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
+        async function startCall() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                peerConnection = new RTCPeerConnection(config);
+                localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit('ice-candidate', event.candidate);
+                    }
+                };
+
+                peerConnection.ontrack = (event) => {
+                    if (event.streams && event.streams[0]) {
+                        const remoteStream = event.streams[0];
+                        // Handle remote stream
+                        const audioTracks = remoteStream.getAudioTracks();
+                        if (audioTracks.length > 0) {
+                            status.textContent = 'Connected with a stranger.';
+                            startCallBtn.style.display = 'none';
+                            endCallBtn.style.display = 'inline-block';
+                        } else {
+                            status.textContent = 'No audio tracks found.';
+                        }
+                    } else {
+                        status.textContent = 'No remote stream found.';
+                    }
+                };
+
+                socket.on('offer', async (offer) => {
+                    try {
+                        if (peerConnection.signalingState === 'stable') {
+                            console.log('Ignoring offer as signaling state is stable.');
+                            return;
+                        }
+
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                        const answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        socket.emit('answer', answer);
+                        status.textContent = 'Waiting for a stranger to connect...';
+                    } catch (error) {
+                        console.error('Error handling offer:', error);
+                        status.textContent = 'Failed to handle offer.';
+                    }
+                });
+
+                socket.on('answer', async (answer) => {
+                    try {
+                        await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+                    } catch (error) {
+                        console.error('Error handling answer:', error);
+                        status.textContent = 'Failed to handle answer.';
+                    }
+                });
+
+                socket.on('ice-candidate', (candidate) => {
+                    try {
+                        peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                    } catch (error) {
+                        console.error('Error adding ICE candidate:', error);
+                    }
+                });
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('offer', offer);
+                status.textContent = 'Waiting for a connection...';
+                startCallBtn.style.display = 'none';
+                endCallBtn.style.display = 'inline-block';
+            } catch (error) {
+                console.error('Error accessing media devices or setting up peer connection:', error);
+                status.textContent = 'Failed to start call.';
+            }
+        }
+
+        function endCall() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            status.textContent = 'Click "Start Call" to connect...';
+            startCallBtn.style.display = 'inline-block';
+            endCallBtn.style.display = 'none';
+        }
+
+        startCallBtn.addEventListener('click', startCall);
+        endCallBtn.addEventListener('click', endCall);
+
+    </script>
+</body>
+</html>
